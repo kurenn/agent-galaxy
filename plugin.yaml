@@ -1,0 +1,3 @@
+name: agent-galaxy
+version: 0.1.0
+description: Interactive 3D galaxy of this agent in the web dashboard (dashboard-only, no agent hooks)
