@@ -8,10 +8,15 @@ skills each project uses, the channels sessions arrive from.
 It runs two ways: as a **Galaxy** tab in the Hermes web dashboard, or as a **static site** you
 export and host anywhere.
 
+![Agent Galaxy](docs/banner.png)
+
+Live example: <https://agent.kurenn.dev>
+
 ## Dashboard tab
 
 ```bash
-hermes plugins install kurenn/agent-galaxy --enable
+hermes plugins install agent-galaxy --enable          # from the Hermes plugin catalog
+hermes plugins install kurenn/agent-galaxy --enable   # or straight from this repository
 ```
 
 Then restart the dashboard (or the gateway that serves it); the plugin's backend route only
@@ -75,6 +80,17 @@ from the top bar; the choice is remembered per browser.
 
 Large histories make the first graph build after a restart slow (seconds) while SQLite reads
 `state.db` from disk; it is cached afterwards.
+
+## Before you install
+
+- **Reads outside its own data:** `state.db` (sessions and messages) and the holographic
+  memory store `memory_store.db` in your Hermes home, read-only; the plugin never writes.
+- **Network:** the dashboard tab and the static page load 3d-force-graph 1.80.1 from
+  `cdn.jsdelivr.net`, pinned by Subresource Integrity, so the browser refuses any other bytes.
+  The static page also loads React 18.3.1 from jsDelivr the same way. The Python side makes no
+  network calls.
+- **No** agent tools, hooks or middleware, shell commands, background processes, stored
+  credentials or telemetry.
 
 ## License
 

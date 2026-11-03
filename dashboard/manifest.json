@@ -3,7 +3,7 @@
   "label": "Galaxy",
   "description": "Interactive 3D map of this agent's tools, skills, memory, projects and channels",
   "icon": "Sparkles",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "tab": { "path": "/galaxy", "position": "after:analytics" },
   "entry": "dist/index.js",
   "api": "plugin_api.py"

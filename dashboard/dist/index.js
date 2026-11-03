@@ -445,7 +445,7 @@
       error && h("p", { className: "text-xs text-destructive" }, error),
       !data && !error && h("p", { className: "text-xs text-muted-foreground" }, "Mapping the galaxy…"),
       h("div", { style: { position: "relative" } },
-        h("div", { ref: el, style: { height: "calc(100vh - 190px)", minHeight: 420, borderRadius: 8, overflow: "hidden" } }),
+        h("div", { ref: el, style: { height: "calc(100vh - var(--galaxy-chrome, 190px))", minHeight: 420, borderRadius: 8, overflow: "hidden" } }),
         h("div", {
           style: { position: "absolute", top: 12, right: 12, width: "min(300px, 60%)", maxHeight: "70%", overflowY: "auto",
             background: "rgba(5,6,15,0.82)", color: "#e6e6f0", padding: 12, borderRadius: 8,
