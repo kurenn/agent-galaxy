@@ -20,7 +20,7 @@ _spec.loader.exec_module(galaxy_graph)
 router = APIRouter()
 
 CACHE_SECONDS = 120
-_cache = {"at": 0.0, "graph": None}
+_cache = {}  # hermes home -> (built_at, graph): one dashboard can serve several profiles
 _lock = threading.Lock()
 
 
@@ -34,10 +34,13 @@ def _agent_name():
 
 
 def _graph():
+    home = get_hermes_home()
     with _lock:
-        if _cache["graph"] is None or time.time() - _cache["at"] > CACHE_SECONDS:
-            _cache["graph"], _cache["at"] = galaxy_graph.build(get_hermes_home(), _agent_name()), time.time()
-        return _cache["graph"]
+        at, graph = _cache.get(str(home), (0.0, None))
+        if graph is None or time.time() - at > CACHE_SECONDS:
+            at, graph = time.time(), galaxy_graph.build(home, _agent_name())
+            _cache[str(home)] = (at, graph)
+        return graph
 
 
 @router.get("/graph")

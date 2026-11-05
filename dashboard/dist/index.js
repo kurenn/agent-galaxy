@@ -231,6 +231,8 @@
     && !hid[l.source.group] && !hid[l.target.group];
 
   const fmt = (n) => Number(n || 0).toLocaleString();
+  // 3d-force-graph puts string tooltips in with innerHTML; labels come from transcripts and memory.
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
 
   function Detail({ node }) {
     if (!node) {
@@ -311,7 +313,7 @@
           // Node drag off: its drag-end fakes a touch pointerup that crashes OrbitControls, and
           // stars are not meant to be moved anyway.
           .enableNodeDrag(false)
-          .nodeLabel((n) => n.label + " · " + fmt(n.count))
+          .nodeLabel((n) => esc(n.label) + " · " + fmt(n.count))
           .nodeThreeObject(function (n) {
             const color = COLORS[n.group] || "#999";
             if (n.group === "agent") {
