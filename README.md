@@ -68,6 +68,15 @@ channel → project. Static links: memory entities that share a fact, and entiti
 mentions a project. Pick a galaxy type (elliptical, spiral, barred spiral, ring, irregular)
 from the top bar; the choice is remembered per browser.
 
+**Replay** plays the galaxy forming one day at a time, from the first day anything was seen
+to today; drag the slider to stop on any day. Each star appears on the day it was first used
+(memory entities on the day they were created), at its present size. **Save image** downloads
+the current view as a PNG.
+
+On an exported site, clicking a star puts it in the URL, so a link like
+`https://your-site/#skill:github-pr-workflow` opens with that star in view. Projects are keyed
+by folder name in a public export (`#project:my-app`), never by path.
+
 ## How it works
 
 - `plugin.yaml` + `__init__.py` make it an installable Hermes plugin under the name

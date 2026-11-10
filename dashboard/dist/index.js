@@ -226,9 +226,12 @@
   // ---- component -----------------------------------------------------------
 
   // Only action flow and shared-memory links are drawn; hub/member links just shape the layout.
-  const nodeShown = (hid) => (n) => !hid[n.group];
-  const linkShown = (hid) => (l) => l.kind in LINK_COLORS
-    && !hid[l.source.group] && !hid[l.target.group];
+  // *until* is the replay's cutoff (unix seconds): stars first seen after it are not born yet.
+  const nodeShown = (hid, until) => (n) => !hid[n.group] && !(n.born > until);
+  const linkShown = (hid, until) => (l) => l.kind in LINK_COLORS
+    && nodeShown(hid, until)(l.source) && nodeShown(hid, until)(l.target);
+  const DAY = 86400;
+  const utcDay = (t) => new Date(t * 1000).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
 
   const fmt = (n) => Number(n || 0).toLocaleString();
   // 3d-force-graph puts string tooltips in with innerHTML; labels come from transcripts and memory.
@@ -265,6 +268,7 @@
     const el = useRef(null);
     const fg = useRef(null);
     const hiddenRef = useRef({});
+    const untilRef = useRef(Infinity);
     const space = useRef(null); // { THREE, tex, dust, flatten } once the scene exists
     const [shape, setShape] = useState(savedShape);
     const shapeRef = useRef(shape);
@@ -272,6 +276,37 @@
     const [error, setError] = useState(null);
     const [selected, setSelected] = useState(null);
     const [hidden, setHidden] = useState({});
+    const [day, setDay] = useState(null); // replay position; null shows today
+    const [playing, setPlaying] = useState(false);
+
+    // Daily replay: day 0 is the first day anything was seen, the last is the day the graph was built.
+    const borns = data ? data.nodes.map((n) => n.born).filter((b) => b != null) : [];
+    const start = borns.length ? Math.floor(Math.min.apply(null, borns) / DAY) * DAY : 0;
+    const days = borns.length ? Math.max(1, Math.ceil(((data.built_at || Math.max.apply(null, borns)) - start) / DAY)) : 0;
+    const until = day == null ? Infinity : start + (day + 1) * DAY;
+
+    useEffect(function () {
+      if (!playing) return;
+      if (day != null && day >= days - 1) { setPlaying(false); return; }
+      const t = setTimeout(function () { setDay((d) => (d == null ? 0 : d + 1)); }, Math.max(40, 12000 / days));
+      return function () { clearTimeout(t); };
+    }, [playing, day, days]);
+
+    function play() {
+      if (playing) { setPlaying(false); return; }
+      if (day == null || day >= days - 1) setDay(0);
+      setPlaying(true);
+    }
+
+    function saveImage() {
+      const g = fg.current;
+      if (!g) return;
+      g.renderer().render(g.scene(), g.camera()); // the drawing buffer is only readable right after a render
+      const a = document.createElement("a");
+      a.download = "agent-galaxy.png";
+      a.href = g.renderer().domElement.toDataURL("image/png");
+      a.click();
+    }
 
     useEffect(function () {
       SDK.fetchJSON("/api/plugins/agent-galaxy/graph").then(setData).catch(function (e) { setError(String(e)); });
@@ -304,6 +339,14 @@
         const flatten = flattenForce(SHAPES[shapeRef.current].flat);
         space.current = { THREE: THREE, tex: tex, dust: dust, flatten: flatten };
 
+        let linked = SDK.deepLinks && location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : "";
+        function focus(n) {
+          setSelected(n);
+          g.controls().autoRotate = false;
+          const d = Math.hypot(n.x || 0, n.y || 0, n.z || 0);
+          const r = d < 1 ? 0 : 1 + 110 / d;
+          g.cameraPosition(d < 1 ? { x: 0, y: 160, z: 320 } : { x: n.x * r, y: n.y * r + 50, z: n.z * r }, n, 1200);
+        }
         const g = ForceGraph3D({ controlType: "orbit" })(el.current)
           .backgroundColor("#000004")
           .showNavInfo(false)
@@ -337,8 +380,8 @@
             o.add(l);
             return o;
           })
-          .nodeVisibility(nodeShown(hiddenRef.current))
-          .linkVisibility(linkShown(hiddenRef.current))
+          .nodeVisibility(nodeShown(hiddenRef.current, untilRef.current))
+          .linkVisibility(linkShown(hiddenRef.current, untilRef.current))
           .linkColor((l) => LINK_COLORS[l.kind])
           .linkOpacity(0.12)
           .linkWidth(0)
@@ -348,11 +391,15 @@
           .linkDirectionalParticleSpeed(0.005)
           .linkDirectionalParticleWidth(1.6)
           .onNodeClick(function (n) {
-            setSelected(n);
-            g.controls().autoRotate = false;
-            const d = Math.hypot(n.x || 0, n.y || 0, n.z || 0);
-            const r = d < 1 ? 0 : 1 + 110 / d;
-            g.cameraPosition(d < 1 ? { x: 0, y: 160, z: 320 } : { x: n.x * r, y: n.y * r + 50, z: n.z * r }, n, 1200);
+            focus(n);
+            // On an exported site the star goes in the URL, so the view can be shared.
+            if (SDK.deepLinks) history.replaceState(null, "", "#" + encodeURI(n.id));
+          })
+          .onEngineTick(function () {
+            if (linked === null) return; // first frame, after warmup: fly to the star the URL names, if any
+            const n = linked && g.graphData().nodes.find((x) => x.id === linked);
+            linked = null;
+            if (n) focus(n);
           })
           .onEngineStop(function () {
             let maxR = 1;
@@ -419,9 +466,10 @@
 
     useEffect(function () {
       hiddenRef.current = hidden;
+      untilRef.current = until;
       const g = fg.current;
-      if (g) g.nodeVisibility(nodeShown(hidden)).linkVisibility(linkShown(hidden));
-    }, [hidden]);
+      if (g) g.nodeVisibility(nodeShown(hidden, until)).linkVisibility(linkShown(hidden, until));
+    }, [hidden, until]);
 
     const s = (data && data.stats) || {};
     const agentName = ((data && data.nodes.find((n) => n.group === "agent")) || {}).label || "";
@@ -439,11 +487,20 @@
           },
           className: "bg-transparent border border-border rounded px-1 py-0.5 text-xs",
         }, Object.keys(SHAPES).map((k) => h("option", { key: k, value: k, style: { color: "#000" } }, SHAPES[k].label))),
+        h("button", { type: "button", onClick: saveImage, className: "bg-transparent border border-border rounded px-1 py-0.5 text-xs cursor-pointer" }, "Save image"),
         Object.keys(COLORS).filter((g) => g !== "agent" && (!data || data.nodes.some((n) => n.group === g))).map((g) =>
           h("label", { key: g, className: "flex items-center gap-1 cursor-pointer" },
             h("input", { type: "checkbox", checked: !hidden[g],
               onChange: () => setHidden(Object.assign({}, hidden, { [g]: !hidden[g] })) }),
             h("span", { style: { color: COLORS[g] } }, "●"), g))),
+      days > 1 && h("div", { className: "flex items-center gap-3 text-xs" },
+        h("button", { type: "button", onClick: play, "aria-label": playing ? "Pause replay" : "Replay the galaxy day by day",
+          className: "bg-transparent border border-border rounded px-1 py-0.5 text-xs cursor-pointer" }, playing ? "❚❚ Pause" : "▶ Replay"),
+        h("input", { type: "range", min: 0, max: days - 1, value: day == null ? days - 1 : day, "aria-label": "Day",
+          onChange: function (e) { setPlaying(false); const v = Number(e.target.value); setDay(v >= days - 1 ? null : v); },
+          style: { flex: 1, minWidth: 120 } }),
+        h("span", { className: "text-muted-foreground", style: { minWidth: 150, textAlign: "right" } },
+          day == null ? "Today · " + fmt(days) + " days" : "Day " + (day + 1) + " · " + utcDay(start + day * DAY))),
       error && h("p", { className: "text-xs text-destructive" }, error),
       !data && !error && h("p", { className: "text-xs text-muted-foreground" }, "Mapping the galaxy…"),
       h("div", { style: { position: "relative" } },

@@ -36,8 +36,8 @@ def build(home, name="Hermes", public=False, memory=True, min_facts=1, hide=()):
     memory entities with fewer facts (mostly noise). *hide* drops stars by name, any kind."""
     nodes, links = [], []
 
-    def node(id_, label, group, count=0, **detail):
-        nodes.append({"id": id_, "label": label, "group": group, "count": count, "detail": detail})
+    def node(id_, label, group, count=0, born=None, **detail):  # born: first seen, unix seconds (None: always)
+        nodes.append({"id": id_, "label": label, "group": group, "count": count, "born": born, "detail": detail})
 
     def link(a, b, kind, count=1):
         links.append({"source": a, "target": b, "kind": kind, "count": count})
@@ -51,12 +51,12 @@ def build(home, name="Hermes", public=False, memory=True, min_facts=1, hide=()):
             stats["messages"] = state.execute("select count(*) from messages").fetchone()[0]
 
             tools = state.execute(
-                "select tool_name, count(*) from messages where role='tool' and tool_name is not null "
+                "select tool_name, count(*), min(timestamp) from messages where role='tool' and tool_name is not null "
                 "group by 1 order by 2 desc").fetchall()
-            stats["tool_calls"] = sum(c for _, c in tools)
+            stats["tool_calls"] = sum(c for _, c, _ in tools)
             node("hub:tools", "Tools", "hub", stats["tool_calls"])
-            for tool, c in tools:
-                node(f"tool:{tool}", tool, "tool", c)
+            for tool, c, born in tools:
+                node(f"tool:{tool}", tool, "tool", c, born)
                 link("hub:tools", f"tool:{tool}", "member")
 
             # Which tool follows which, within a session: the agent's action flow.
@@ -68,23 +68,23 @@ def build(home, name="Hermes", public=False, memory=True, min_facts=1, hide=()):
                 link(f"tool:{prev}", f"tool:{cur}", "flow", c)
 
             skills = state.execute(
-                "select json_extract(json_extract(j.value, '$.function.arguments'), '$.name'), count(*) "
+                "select json_extract(json_extract(j.value, '$.function.arguments'), '$.name'), count(*), min(m.timestamp) "
                 "from messages m, json_each(m.tool_calls) j "
                 "where m.role='assistant' and m.tool_calls like '%skill_view%' "
                 "and json_extract(j.value, '$.function.name') = 'skill_view' "
                 "group by 1 order by 2 desc limit ?", (MAX_SKILLS,)).fetchall()
-            node("hub:skills", "Skills", "hub", sum(c for _, c in skills))
-            for skill, c in skills:
+            node("hub:skills", "Skills", "hub", sum(c for _, c, _ in skills))
+            for skill, c, born in skills:
                 if skill:
-                    node(f"skill:{skill}", skill, "skill", c)
+                    node(f"skill:{skill}", skill, "skill", c, born)
                     link("hub:skills", f"skill:{skill}", "member")
 
             projects = [row for row in state.execute(
-                "select cwd, count(*), coalesce(sum(tool_call_count), 0) from sessions "
+                "select cwd, count(*), coalesce(sum(tool_call_count), 0), min(started_at) from sessions "
                 "group by 1 order by 2 desc") if is_project(row[0])]
-            node("hub:projects", "Projects", "hub", sum(c for _, c, _ in projects))
-            for cwd, c, tc in projects:
-                node(f"project:{cwd}", os.path.basename(cwd), "project", c, tool_calls=tc, **({} if public else {"path": cwd}))
+            node("hub:projects", "Projects", "hub", sum(row[1] for row in projects))
+            for cwd, c, tc, born in projects:
+                node(f"project:{cwd}", os.path.basename(cwd), "project", c, born, tool_calls=tc, **({} if public else {"path": cwd}))
                 link("hub:projects", f"project:{cwd}", "member")
                 project_by_name[os.path.basename(cwd).lower()] = f"project:{cwd}"
 
@@ -107,10 +107,11 @@ def build(home, name="Hermes", public=False, memory=True, min_facts=1, hide=()):
                 "and json_extract(j.value, '$.function.name') = 'skill_view' "
                 "group by 1, 2 order by 3 desc"), "skill", "uses-skill")
 
-            channels = state.execute("select source, count(*) from sessions group by 1 order by 2 desc").fetchall()
-            node("hub:channels", "Channels", "hub", sum(c for _, c in channels))
-            for src, c in channels:
-                node(f"channel:{src}", src, "channel", c)
+            channels = state.execute(
+                "select source, count(*), min(started_at) from sessions group by 1 order by 2 desc").fetchall()
+            node("hub:channels", "Channels", "hub", sum(c for _, c, _ in channels))
+            for src, c, born in channels:
+                node(f"channel:{src}", src, "channel", c, born)
                 link("hub:channels", f"channel:{src}", "member")
             for src, cwd, c in state.execute(
                 "select source, cwd, count(*) from sessions where cwd != '' group by 1, 2"):
@@ -127,11 +128,12 @@ def build(home, name="Hermes", public=False, memory=True, min_facts=1, hide=()):
                 "select fe.entity_id, f.content from fact_entities fe join facts f using (fact_id) "
                 "order by f.trust_score desc"):
                 facts_by_entity.setdefault(eid, []).append(content[:200])
-            for eid, label, etype in mem.execute("select entity_id, name, entity_type from entities"):
+            for eid, label, etype, born in mem.execute(
+                    "select entity_id, name, entity_type, cast(strftime('%s', created_at) as real) from entities"):
                 facts = facts_by_entity.get(eid, [])
                 if len(facts) < min_facts:
                     continue
-                node(f"entity:{eid}", label if len(label) <= 48 else label[:47] + "…", "memory", len(facts), type=etype, **({} if public else {"facts": facts[:5]}))
+                node(f"entity:{eid}", label if len(label) <= 48 else label[:47] + "…", "memory", len(facts), born, type=etype, **({} if public else {"facts": facts[:5]}))
                 link("hub:memory", f"entity:{eid}", "member")
                 for word in set(re.findall(r"[\w-]+", label.lower())) & project_by_name.keys():
                     link(f"entity:{eid}", project_by_name[word], "about", len(facts))  # names a project
@@ -148,6 +150,16 @@ def build(home, name="Hermes", public=False, memory=True, min_facts=1, hide=()):
     for n in nodes:
         if n["group"] == "hub":
             link("agent", n["id"], "hub", n["count"])
+    if public:  # project ids are full paths; key them by folder name instead
+        rename = {}
+        for n in nodes:
+            if n["group"] == "project":
+                new = f"project:{n['label']}"
+                while new in rename.values():
+                    new += "-2"
+                rename[n["id"]] = n["id"] = new
+        for l in links:
+            l["source"], l["target"] = rename.get(l["source"], l["source"]), rename.get(l["target"], l["target"])
     ids = {n["id"] for n in nodes}
     links = [l for l in links if l["source"] in ids and l["target"] in ids]  # e.g. a skill outside the top 40
     return {"nodes": nodes, "links": links, "stats": stats, "built_at": time.time()}
@@ -163,10 +175,10 @@ if __name__ == "__main__":  # self-check: python3 dashboard/galaxy_graph.py
     with tempfile.TemporaryDirectory() as d:  # a tiny memory store: one rich entity, one noisy, one hidden
         db = sqlite3.connect(Path(d) / "memory_store.db")
         db.executescript(
-            "create table facts(fact_id, content, trust_score); create table entities(entity_id, name, entity_type);"
+            "create table facts(fact_id, content, trust_score); create table entities(entity_id, name, entity_type, created_at);"
             "create table fact_entities(fact_id, entity_id);"
             "insert into facts values (1,'a',1),(2,'b',1),(3,'c',1);"
-            "insert into entities values (1,'Rich','x'),(2,'Say hi','x'),(3,'Secret','x');"
+            "insert into entities values (1,'Rich','x','2026-11-01 00:00:00'),(2,'Say hi','x',null),(3,'Secret','x',null);"
             "insert into fact_entities values (1,1),(2,1),(3,2),(1,3),(2,3);")
         db.commit(); db.close()
         label = lambda g: {n["label"] for n in g["nodes"] if n["group"] == "memory"}
@@ -175,4 +187,16 @@ if __name__ == "__main__":  # self-check: python3 dashboard/galaxy_graph.py
         g = build(d, min_facts=2, hide=["secret"])
         assert label(g) == {"Rich"} and all("entity:3" not in (l["source"], l["target"]) for l in g["links"])
         assert not label(build(d, memory=False))
+        assert {n["label"]: n["born"] for n in build(d)["nodes"]}["Rich"] == 1793491200  # 2026-11-01 UTC
+        sdb = sqlite3.connect(Path(d) / "state.db")  # one session in a project folder
+        sdb.executescript(
+            "create table sessions(id, source, cwd, started_at, tool_call_count);"
+            "create table messages(id, session_id, role, tool_name, tool_calls, timestamp);"
+            "insert into sessions values ('s','cli','/home/me/code/app',1,2);"
+            "insert into messages values (1,'s','tool','read',null,5),(2,'s','tool','write',null,9);")
+        sdb.commit(); sdb.close()
+        g = build(d, public=True)
+        assert not any("/" in str(v) for n in g["nodes"] for v in (n["id"], *n["detail"].values())), "path leaked"
+        assert not any("/" in l["source"] + l["target"] for l in g["links"]), "path leaked in a link"
+        assert {n["id"]: n["born"] for n in g["nodes"]}["tool:write"] == 9
     print("galaxy_graph: ok")
