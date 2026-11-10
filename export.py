@@ -8,8 +8,9 @@ directory over HTTP (the page fetches graph.json, which file:// blocks).
 
 The export is public by default: memory fact text and full project paths are left
 out. Tool, skill, project, channel and memory-entity *names* and all counts are
-included. --no-memory leaves memory out entirely, since entity names can name people
-and clients. --private keeps fact text and paths, for a page behind your own auth.
+included. Entity names can name people and clients: --min-facts N keeps only entities
+with at least N facts (which also drops most noise), --hide "a,b" drops stars by name
+(any kind), and --no-memory leaves memory out entirely. --private keeps fact text and paths, for a page behind your own auth.
 Standard library only; reads the Hermes databases read-only and never writes them.
 """
 import argparse
@@ -33,6 +34,8 @@ def main():
     p.add_argument("--out", default="galaxy-site", help="output directory (default: galaxy-site)")
     p.add_argument("--private", action="store_true", help="also include memory fact text and full project paths")
     p.add_argument("--no-memory", action="store_true", help="leave memory out entirely (entity names can name people)")
+    p.add_argument("--min-facts", type=int, default=1, metavar="N", help="only memory entities with at least N facts (default 1)")
+    p.add_argument("--hide", default="", metavar="NAMES", help="comma-separated star names to leave out, any kind")
     a = p.parse_args()
 
     home = Path(a.hermes_home).expanduser()
@@ -41,7 +44,8 @@ def main():
 
     if a.private and a.no_memory:
         sys.exit("export.py: --private and --no-memory contradict each other; pick one")
-    graph = galaxy_graph.build(home, a.name, public=not a.private, memory=not a.no_memory)
+    graph = galaxy_graph.build(home, a.name, public=not a.private, memory=not a.no_memory,
+                               min_facts=a.min_facts, hide=a.hide.split(","))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")

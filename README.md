@@ -48,7 +48,9 @@ Upload `galaxy-site/` to any static host. It must be served over HTTP(S) — the
 (entity names capped at 48 characters), and all counts. It leaves out memory fact text and
 full project paths. `--private` puts both back; only use it for a page behind your own auth.
 Read `graph.json` before publishing it — entity names come from your agent's memory and can
-name people or clients. `--no-memory` leaves memory out of the export entirely.
+name people or clients. `--min-facts 2` keeps only entities with at least two facts, which
+also drops most of the noise; `--hide "name,other"` leaves out stars by name, of any kind
+(entities, projects, channels, tools, skills); `--no-memory` leaves memory out entirely.
 
 ## What you are looking at
 

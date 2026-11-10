@@ -29,10 +29,11 @@ def _ro(home, name):
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
 
 
-def build(home, name="Hermes", public=False, memory=True):
+def build(home, name="Hermes", public=False, memory=True, min_facts=1, hide=()):
     """The graph for the Hermes home at *home*. *public* drops memory fact text and full
     project paths, for pages published outside the authenticated dashboard. *memory=False*
-    leaves memory out entirely: entity names can name people and clients."""
+    leaves memory out entirely: entity names can name people and clients. *min_facts* skips
+    memory entities with fewer facts (mostly noise). *hide* drops stars by name, any kind."""
     nodes, links = [], []
 
     def node(id_, label, group, count=0, **detail):
@@ -128,6 +129,8 @@ def build(home, name="Hermes", public=False, memory=True):
                 facts_by_entity.setdefault(eid, []).append(content[:200])
             for eid, label, etype in mem.execute("select entity_id, name, entity_type from entities"):
                 facts = facts_by_entity.get(eid, [])
+                if len(facts) < min_facts:
+                    continue
                 node(f"entity:{eid}", label if len(label) <= 48 else label[:47] + "…", "memory", len(facts), type=etype, **({} if public else {"facts": facts[:5]}))
                 link("hub:memory", f"entity:{eid}", "member")
                 for word in set(re.findall(r"[\w-]+", label.lower())) & project_by_name.keys():
@@ -139,6 +142,8 @@ def build(home, name="Hermes", public=False, memory=True):
                 link(f"entity:{a}", f"entity:{b}", "shared-fact", c)
         mem.close()
 
+    hidden = {h.strip().lower() for h in hide if h.strip()}
+    nodes = [n for n in nodes if n["group"] == "hub" or n["label"].lower() not in hidden]
     node("agent", name, "agent", stats.get("sessions", 0), **stats)
     for n in nodes:
         if n["group"] == "hub":
@@ -154,4 +159,20 @@ if __name__ == "__main__":  # self-check: python3 dashboard/galaxy_graph.py
     for cwd in ("", None, "/", "/root", "/home/me", "/home/me/", "/Users/me", "/opt/hermes", "/opt/hermes/x",
                 "/home/me/.hermes", "/home/me/.hermes/profiles/a"):
         assert not is_project(cwd), cwd
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:  # a tiny memory store: one rich entity, one noisy, one hidden
+        db = sqlite3.connect(Path(d) / "memory_store.db")
+        db.executescript(
+            "create table facts(fact_id, content, trust_score); create table entities(entity_id, name, entity_type);"
+            "create table fact_entities(fact_id, entity_id);"
+            "insert into facts values (1,'a',1),(2,'b',1),(3,'c',1);"
+            "insert into entities values (1,'Rich','x'),(2,'Say hi','x'),(3,'Secret','x');"
+            "insert into fact_entities values (1,1),(2,1),(3,2),(1,3),(2,3);")
+        db.commit(); db.close()
+        label = lambda g: {n["label"] for n in g["nodes"] if n["group"] == "memory"}
+        assert label(build(d)) == {"Rich", "Say hi", "Secret"}
+        assert label(build(d, min_facts=2)) == {"Rich", "Secret"}
+        g = build(d, min_facts=2, hide=["secret"])
+        assert label(g) == {"Rich"} and all("entity:3" not in (l["source"], l["target"]) for l in g["links"])
+        assert not label(build(d, memory=False))
     print("galaxy_graph: ok")
