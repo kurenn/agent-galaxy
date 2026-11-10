@@ -428,7 +428,7 @@
     return h("div", { className: "space-y-2" },
       h("div", { className: "flex flex-wrap items-center gap-3 text-xs" },
         h("span", { className: "font-semibold text-sm" }, agentName),
-        ["sessions", "messages", "tool_calls", "facts"].map((k) =>
+        ["sessions", "messages", "tool_calls", "facts"].filter((k) => k in s).map((k) =>
           h("span", { key: k, className: "text-muted-foreground" }, k.replace("_", " "), " ", h("b", null, fmt(s[k])))),
         h("span", { className: "flex-1" }),
         h("select", {
@@ -439,7 +439,7 @@
           },
           className: "bg-transparent border border-border rounded px-1 py-0.5 text-xs",
         }, Object.keys(SHAPES).map((k) => h("option", { key: k, value: k, style: { color: "#000" } }, SHAPES[k].label))),
-        Object.keys(COLORS).filter((g) => g !== "agent").map((g) =>
+        Object.keys(COLORS).filter((g) => g !== "agent" && (!data || data.nodes.some((n) => n.group === g))).map((g) =>
           h("label", { key: g, className: "flex items-center gap-1 cursor-pointer" },
             h("input", { type: "checkbox", checked: !hidden[g],
               onChange: () => setHidden(Object.assign({}, hidden, { [g]: !hidden[g] })) }),

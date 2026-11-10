@@ -47,7 +47,8 @@ Upload `galaxy-site/` to any static host. It must be served over HTTP(S) — the
 **What a public export contains:** tool, skill, project, channel and memory-entity *names*
 (entity names capped at 48 characters), and all counts. It leaves out memory fact text and
 full project paths. `--private` puts both back; only use it for a page behind your own auth.
-Read `graph.json` before publishing it — entity names come from your agent's memory.
+Read `graph.json` before publishing it — entity names come from your agent's memory and can
+name people or clients. `--no-memory` leaves memory out of the export entirely.
 
 ## What you are looking at
 

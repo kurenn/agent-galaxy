@@ -29,9 +29,10 @@ def _ro(home, name):
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
 
 
-def build(home, name="Hermes", public=False):
+def build(home, name="Hermes", public=False, memory=True):
     """The graph for the Hermes home at *home*. *public* drops memory fact text and full
-    project paths, for pages published outside the authenticated dashboard."""
+    project paths, for pages published outside the authenticated dashboard. *memory=False*
+    leaves memory out entirely: entity names can name people and clients."""
     nodes, links = [], []
 
     def node(id_, label, group, count=0, **detail):
@@ -115,28 +116,28 @@ def build(home, name="Hermes", public=False):
                 link(f"channel:{src}", f"project:{cwd}", "runs-in", c)
         state.close()
 
-    memory = _ro(home, "memory_store.db")
-    if memory:
-        with memory:
-            stats["facts"] = memory.execute("select count(*) from facts").fetchone()[0]
+    mem = _ro(home, "memory_store.db") if memory else None
+    if mem:
+        with mem:
+            stats["facts"] = mem.execute("select count(*) from facts").fetchone()[0]
             node("hub:memory", "Memory", "hub", stats["facts"])
             facts_by_entity = {}
-            for eid, content in memory.execute(
+            for eid, content in mem.execute(
                 "select fe.entity_id, f.content from fact_entities fe join facts f using (fact_id) "
                 "order by f.trust_score desc"):
                 facts_by_entity.setdefault(eid, []).append(content[:200])
-            for eid, label, etype in memory.execute("select entity_id, name, entity_type from entities"):
+            for eid, label, etype in mem.execute("select entity_id, name, entity_type from entities"):
                 facts = facts_by_entity.get(eid, [])
                 node(f"entity:{eid}", label if len(label) <= 48 else label[:47] + "…", "memory", len(facts), type=etype, **({} if public else {"facts": facts[:5]}))
                 link("hub:memory", f"entity:{eid}", "member")
                 for word in set(re.findall(r"[\w-]+", label.lower())) & project_by_name.keys():
                     link(f"entity:{eid}", project_by_name[word], "about", len(facts))  # names a project
             # Entities that share a fact are linked: the shape of what it remembers.
-            for a, b, c in memory.execute(
+            for a, b, c in mem.execute(
                 "select x.entity_id, y.entity_id, count(*) from fact_entities x "
                 "join fact_entities y on x.fact_id = y.fact_id and x.entity_id < y.entity_id group by 1, 2"):
                 link(f"entity:{a}", f"entity:{b}", "shared-fact", c)
-        memory.close()
+        mem.close()
 
     node("agent", name, "agent", stats.get("sessions", 0), **stats)
     for n in nodes:
